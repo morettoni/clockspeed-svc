@@ -1,0 +1,37 @@
+#!/bin/sh
+
+MAX=7884000
+SLEEP=300
+NTP=IP_SERVER_NTP
+ROOT=/usr/local/clockspeed
+BIN=/usr/local/clockspeed/bin
+TMP=/tmp
+
+exec 2>&1
+
+echo "starting..."
+
+while true
+do
+  NEXT=`date +%s`
+  NEXT=`expr ${NEXT} + ${SLEEP}`
+  echo "next clock adjust in ${SLEEP} seconds (`date -r ${NEXT}`)"
+  sleep ${SLEEP}
+
+  ${BIN}/sntpclock ${NTP} > ${TMP}/clockadj-${SLEEP}
+
+  if [ $? != 0 ]; then
+    rm -f ${TMP}/clockadj-${SLEEP}
+    SLEEP=300
+    echo "can't read clock from ${NTP}, retry in ${SLEEP} seconds..."
+    continue
+  fi
+
+  cat ${TMP}/clockadj-${SLEEP} | tee ${ROOT}/adjust | ${BIN}/clockview
+  rm -f ${TMP}/clockadj-${SLEEP}
+
+  SLEEP=`expr ${SLEEP} + ${SLEEP}`
+  [ ${SLEEP} -gt ${MAX} ] && SLEEP=${MAX}
+done
+
+echo "exiting"

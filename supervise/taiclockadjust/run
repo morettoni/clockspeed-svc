@@ -1,0 +1,16 @@
+#!/bin/sh
+
+MAX=7884000
+SLEEP=300
+NTP=IP_SERVER_TAICLOCKD
+ROOT=/usr/local/clockspeed
+BIN=/usr/local/clockspeed/bin
+
+while true
+do
+  sleep ${SLEEP}
+  ${BIN}/taiclock ${NTP} | tee ${ROOT}/adjust | ${BIN}/clockview
+
+  SLEEP=`expr ${SLEEP} + ${SLEEP}`
+  [ ${SLEEP} -gt ${MAX} ] && SLEEP=${MAX}
+done

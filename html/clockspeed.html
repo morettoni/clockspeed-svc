@@ -1,0 +1,195 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+ <head>
+  <title>clockspeed</title>
+  <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+  <meta name="description" content="Luca Morettoni, software and internet consulting">
+  <meta name="keywords" content="internet,software,sviluppo,unix,freebsd,bsd,linux,qmail,djbdns,tinydns,clockspeed,c,php,opensource,italia">
+  <meta name="author" content="Luca Morettoni">
+  <meta name="robots" content="all">
+  <meta name="rating" content="general">
+ </head>
+ <body>
+  <a href="index.html">Luca Morettoni</a>
+  <h1>clockspeed</h1>
+  <h2>Che cos'&egrave;</h2>
+  <a href="http://cr.yp.to/clockspeed.html">clockspeed</a> &egrave; un
+  software sviluppato da Dan Bernstein come sostituto dei vari demoni
+  <tt>ntp</tt>. La sua funzione &egrave; quella di mantenere costantemente
+  aggiornato l'orologio di sistema del vostro computer, in modo da evitare
+  i normali disallineamenti causati dalla poca precisione.
+  Al contrario dei classici server <tt>ntp</tt> che contattano frequentemente
+  i vari server di sincronizzazione presenti su Internet, <tt>clockspeed</tt>
+  utilizza un algoritmo interno di compensazione, aggiustando ogni tre secondi
+  il clock interno. Ovviamente anche <tt>clockspeed</tt> deve periodicamente
+  contattare un server <tt>ntp</tt> esterno per verificare l'allineamento,
+  tuttavia &egrave; sufficiente effettuare tale controllo anche solo una
+  volta al mese.
+  <h2>Installazione</h2>
+  Scaricate i sorgenti, disponibili all'indirizzo
+  <a href="http://cr.yp.to/clockspeed/clockspeed-0.62.tar.gz">http://cr.yp.to/clockspeed/clockspeed-0.62.tar.gz</a>
+  successivamente, come utente <tt>root</tt>:
+<pre>
+# tar xvfz clockspeed-0.62.tar.gz
+# cd clockspeed-0.62
+# make
+# make setup check
+</pre>
+  a questo punto <tt>clockspeed</tt> &egrave; stato installato in <tt>/usr/local/clockspeed</tt>,
+  se preferite avere gli eseguibili installati in <tt>/usr/local/bin</tt>
+  modificate il file <tt>conf-home</tt> inserendo <tt>/usr/local</tt>.<br>
+  Se usate i sistemi *BSD basta installare il relativo port
+  (per <a href="http://www.FreeBSD.org">FreeBSD</a> trovate il tutto in
+  <tt>/usr/ports/sysutils/clockspeed</tt>) e seguire le eventuali istruzioni.<br>
+  <b>Fate attenzione, <tt>clockspeed</tt> lavora tenendo conto dei &quot;leap
+    seconds&quot;, quindi fate riferimento alla configurazione del vostro sistema
+    operativo per attivare tale accorgimento, altrimenti vi troverete il clock
+    di sistema disallineato di 22 secondi!!</b>
+  <h2>Configurazione</h2>
+  Ora siamo pronti a configurare <tt>clockspeed</tt>, creeremo due servizi
+  <tt>daemontools</tt>: il primo per eseguire <tt>clockspeed</tt> stesso, il
+  secondo per allineare periodicamente il clock. Per il primo, il file <tt>run</tt>
+  conterr&agrave;:
+<pre>
+#!/bin/sh
+
+NTP=<b>IP_SERVER_NTP</b>
+BIN=/usr/local/clockspeed/bin
+
+${BIN}/sntpclock ${NTP} | ${BIN}/clockadd
+#${BIN}/taiclock ${NTP} | ${BIN}/clockadd
+
+exec ${BIN}/clockspeed
+</pre>
+  Innanzi tutto occorre scegliere un server <tt>ntp</tt> da utilizzarsi,
+  la lista &egrave; disponibile all'indirizzo
+  <a href="http://www.eecis.udel.edu/~mills/ntp/clock2a.html">http://www.eecis.udel.edu/~mills/ntp/clock2a.html</a>,
+  a questo punto inseriremo il suo indirizzo IP nello script (parametro 
+  <tt>NTP</tt>). Fate attenzione anche ai path, impostati con le
+  variabili <tt>ROOT</tt> e <tt>BIN</tt> (rispettivamente dove si
+  trova installato <tt>clockspeed</tt> e i suoi binari).<br>
+  Se intendete utilizzare <tt>taiclockd</tt> (si veda pi&ugrave; avanti)
+  occorre commentare la riga <tt>sntpclock ... clockadd</tt> e togliere
+  il commento dalla successiva (<tt>taiclock ... clockadd</tt>).
+  <p>
+  Non &egrave; necessario configurare il logger in quanto <tt>clockspeed</tt>
+  non visualizza nessun messaggio.
+  <p>
+  Il secondo servizio, quello per inviare a <tt>clockspeed</tt> le informazioni
+  di sincronizzazione &egrave; leggermente pi&ugrave; complesso, infatti la frequenza
+  con cui verr&agrave; contattato il server <tt>ntp</tt> esterno verr&agrave;
+  raddoppiata ad ogni interrogazione, fino ad arrivare ad un valore massimo
+  prefissato.
+<pre>
+#!/bin/sh
+
+MAX=7884000
+SLEEP=300
+NTP=IP_SERVER_NTP
+ROOT=/usr/local/clockspeed
+BIN=/usr/local/clockspeed/bin
+TMP=/tmp
+
+exec 2>&1
+
+echo "starting..."
+
+while true
+do
+  NEXT=`date +%s`
+  NEXT=`expr ${NEXT} + ${SLEEP}`
+  echo "next clock adjust in ${SLEEP} seconds (`date -r ${NEXT}`)"
+  sleep ${SLEEP}
+
+  ${BIN}/sntpclock ${NTP} > ${TMP}/clockadj-${SLEEP}
+
+  if [ $? != 0 ]; then
+    rm -f ${TMP}/clockadj-${SLEEP}
+    SLEEP=300
+    echo "can't read clock from ${NTP}, retry in ${SLEEP} seconds..."
+    continue
+  fi
+
+  cat ${TMP}/clockadj-${SLEEP} | tee ${ROOT}/adjust | ${BIN}/clockview
+  rm -f ${TMP}/clockadj-${SLEEP}
+
+  SLEEP=`expr ${SLEEP} + ${SLEEP}`
+  [ ${SLEEP} -gt ${MAX} ] && SLEEP=${MAX}
+done
+
+echo "exiting"
+</pre>
+  Lo script produrr&agrave; come output le informazioni sull'allineamento,
+  ecco un breve esempio:
+<pre>
+@4000000043fc719b259832ec starting...
+@4000000043fc719b26fcd7b4 next clock adjust in 300 seconds (Wed Feb 22 15:18:15 CET 2006)
+@4000000043fc72b812de585c before: 2006-02-22 15:18:00.316150000000000000
+@4000000043fc72b81312a6fc after:  2006-02-22 15:18:00.322069622050389647
+@4000000043fc72b815577a64 next clock adjust in 600 seconds (Wed Feb 22 15:28:00 CET 2006)
+</pre>
+  per archiviare questi log useremo un sottoservizio di logging con
+  il seguente file di <tt>run</tt>:
+<pre>
+#!/bin/sh
+
+exec multilog t ./main
+</pre>
+  Potete ottenere i sorgenti dei servizi scaricando il pacchetto
+  <a href="bsd/clockspeed-svc-0.4.tar.gz">clockspeed-svc-0.4.tar.gz</a>.
+  <p>
+  All'indirizzo <a href="http://morettoni.net/rrd-clockspeed/">http://morettoni.net/rrd-clockspeed/</a>
+  troverete un grafico che mostra la precisione di <tt>clockspeed</tt>, se volete
+  generare i grafici potere usare lo script <tt>clockspeed.sh</tt> che trovate nel pacchetto.
+  <p>
+  <h2>Sincronizzazione di reti</h2>
+  E' possibile sincronizzare tutti i computer all'interno della
+  propria rete ricorrendo ad un unico server centrale di riferimento,
+  grazie al demone <tt>taiclockd</tt> e al suo client <tt>taiclock</tt>.
+  Il primo, <tt>taiclockd</tt>, verr&agrave; eseguito su di un server di
+  riferimento, con uno script molto semplice (che trovate sempre nel
+  pacchetto dei servizi visto prima):
+<pre>
+#!/bin/sh
+
+BIN=/usr/local/clockspeed/bin
+
+exec ${BIN}/taiclockd
+</pre>
+  ovviamente su questa macchina server eseguite anche <tt>clockspeed</tt>
+  e il servizio di aggiornamento per fare in modo che il clock sia aggiornato.
+  <p>
+  Sui client, oltre che l'immancabile <tt>clockspeed</tt> verr&agrave; utilizzato
+  il seguente script di aggiornamento (noterete alcuni cambiamenti rispetto allo
+  script precedente):
+<pre>
+#!/bin/sh
+
+MAX=7884000
+SLEEP=300
+NTP=<b>IP_SERVER_TAICLOCKD</b>
+ROOT=/usr/local/clockspeed
+BIN=/usr/local/clockspeed/bin
+
+while true
+do
+  sleep ${SLEEP}
+  ${BIN}/taiclock ${NTP} | tee ${ROOT}/adjust | ${BIN}/clockview
+
+  SLEEP=`expr ${SLEEP} + ${SLEEP}`
+  [ ${SLEEP} -gt ${MAX} ] && SLEEP=${MAX}
+done
+</pre>
+  come noterete in questo script viene usato il client <tt>taiclock</tt> (al
+  posto di <tt>sntpclock</tt>) e occorrer&agrave; impostare l'indirizzo IP
+  del nostro server in cui abbiamo attivato <tt>taiclockd</tt>.<br>
+  Anche qui &egrave; possibile memorizzare l'output dello script per
+  poter controllare gli aggiustamenti del clock, lo script sar&agrave;
+  simile al precedente (cos&igrave; come il suo output):
+<pre>
+#!/bin/sh
+
+exec multilog t ./main
+</pre>
+ </body>
+</html>
